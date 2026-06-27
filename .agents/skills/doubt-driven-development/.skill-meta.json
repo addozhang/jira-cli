@@ -1,0 +1,13 @@
+{
+  "sourceType": "github",
+  "source": "github",
+  "url": "https://github.com/addyosmani/agent-skills",
+  "repo": "addyosmani/agent-skills",
+  "ref": null,
+  "subpath": "skills/doubt-driven-development",
+  "installSource": "addyosmani/agent-skills/skills/doubt-driven-development",
+  "skillName": "doubt-driven-development",
+  "scope": "project",
+  "installedAt": "2026-06-26T02:29:52.559Z",
+  "updatedAt": "2026-06-26T02:29:52.559Z"
+}

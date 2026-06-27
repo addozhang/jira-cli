@@ -1,0 +1,13 @@
+{
+  "sourceType": "github",
+  "source": "github",
+  "url": "https://github.com/addyosmani/agent-skills",
+  "repo": "addyosmani/agent-skills",
+  "ref": null,
+  "subpath": "skills/debugging-and-error-recovery",
+  "installSource": "addyosmani/agent-skills/skills/debugging-and-error-recovery",
+  "skillName": "debugging-and-error-recovery",
+  "scope": "project",
+  "installedAt": "2026-06-26T02:29:52.557Z",
+  "updatedAt": "2026-06-26T02:29:52.557Z"
+}

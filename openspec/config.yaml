@@ -1,0 +1,63 @@
+schema: spec-driven
+
+context: |
+  Project: jr — a URL-native Jira Server / Data Center CLI written in Go.
+  Binary name: jr. Module path: github.com/addozhang/jira-cli.
+
+  This project is the third in a family of consistent Atlassian/CI CLIs by the
+  same author, and MUST follow the same design DNA:
+    - jk  (https://github.com/addozhang/jk)            — Jenkins CLI
+    - cfl (https://github.com/addozhang/confluence-cli) — Confluence Server/DC CLI
+
+  Scope (Server / Data Center only):
+    - Jira Cloud is OUT of scope (different auth + REST v3 + ADF body format).
+    - First release command surface:
+        auth   add / list / remove / whoami
+        issue  get / comment
+        search (JQL)
+        version
+    - issue create/update/transition/assign and sprint/board (Agile API) are deliberately out of scope for this change.
+
+  Core design principles (carried over from jk + cfl):
+    - URL-as-identity: every issue command accepts a Jira URL you'd paste into a
+      browser (e.g. https://jira.example.com/browse/PROJ-123). The host (plus
+      optional reverse-proxy context path) selects the stored credential. A bare
+      issue key (PROJ-123) requires --instance URL|alias.
+    - Stable, self-owned schema: -o yaml|json|raw, YAML default. Every structured
+      response begins with schemaVersion: "1". Field stability tiers documented in
+      docs/schema.md. Breaking changes bump the version; additive ones do not.
+    - PAT Bearer auth: credentials are Personal Access Tokens sent as
+      Authorization: Bearer <token>. No username stored or transmitted. Tokens are
+      stored in ~/.config/jr/credentials (TOML, mode 0600) and NEVER printed.
+    - Thin transport, not a converter: issue description/comment bodies move as
+      Jira Server wiki markup, passed through verbatim in both directions. No
+      Markdown/wiki conversion — the caller (human or LLM) owns the format.
+    - Write operations are limited to explicit `issue comment` in this release.
+    - Actionable errors: every failure is a one-sentence message plus a suggested
+      next step; --debug logs the redacted HTTP exchange (Authorization redacted).
+    - Exit codes: 0 success, >=10 any jr-level error (bad URL, auth, network,
+      parse, config). No intermediate command-result codes in the core release.
+
+  Tech stack & conventions:
+    - Go 1.22+, Cobra for command tree, standard library net/http for transport.
+    - Layout mirrors jk/cfl: cmd/jr/, internal/, docs/, openspec/, skills/jr-jira-cli/, test/.
+    - SSL_CERT_FILE honored for custom CA bundles; --insecure as last resort.
+    - Global flags: -o/--output, --timeout (default 30s), --insecure, --debug.
+    - Short flags: -o output, -i instance, -p param/parent, -y yes, -l limit.
+    - Distribution: GoReleaser + Homebrew tap addozhang/tap. MIT license.
+    - Tests: unit + integration with -race; e2e under test/e2e behind an e2e build tag.
+    - Development MUST follow SDD + TDD:
+        * Source-Driven Development: framework/library/API-specific implementation decisions must be checked against official docs for the detected version before coding. Cite sources in implementation notes or final summaries when those docs materially shape the change.
+        * Test-Driven Development: new behavior and bug fixes require a failing test first, then minimal code to pass, then refactor. Keep tests focused on observable behavior.
+    - Ships a companion AI agent skill at skills/jr-jira-cli/.
+    - SPEC.md is the engineering constitution; all behavior changes go through OpenSpec.
+
+# Per-artifact rules (optional)
+# Add custom rules for specific artifacts.
+# Example:
+#   rules:
+#     proposal:
+#       - Keep proposals under 500 words
+#       - Always include a "Non-goals" section
+#     tasks:
+#       - Break tasks into chunks of max 2 hours

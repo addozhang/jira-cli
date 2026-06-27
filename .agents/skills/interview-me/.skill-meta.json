@@ -1,0 +1,13 @@
+{
+  "sourceType": "github",
+  "source": "github",
+  "url": "https://github.com/addyosmani/agent-skills",
+  "repo": "addyosmani/agent-skills",
+  "ref": null,
+  "subpath": "skills/interview-me",
+  "installSource": "addyosmani/agent-skills/skills/interview-me",
+  "skillName": "interview-me",
+  "scope": "project",
+  "installedAt": "2026-06-26T02:29:52.562Z",
+  "updatedAt": "2026-06-26T02:29:52.562Z"
+}
