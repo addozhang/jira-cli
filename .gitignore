@@ -1,5 +1,7 @@
 /bin/
 /dist/
+/.agents/
+/.opencode/
 *.test
 coverage.out
 .DS_Store
