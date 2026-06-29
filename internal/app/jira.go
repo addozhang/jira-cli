@@ -41,6 +41,23 @@ type CommentResponse struct {
 	Created       string `json:"created,omitempty" yaml:"created,omitempty"`
 }
 
+type CommentsResponse struct {
+	SchemaVersion string         `json:"schemaVersion" yaml:"schemaVersion"`
+	IssueKey      string         `json:"issueKey" yaml:"issueKey"`
+	StartAt       int            `json:"startAt" yaml:"startAt"`
+	MaxResults    int            `json:"maxResults" yaml:"maxResults"`
+	Total         int            `json:"total" yaml:"total"`
+	Comments      []CommentEntry `json:"comments" yaml:"comments"`
+}
+
+type CommentEntry struct {
+	ID      string `json:"id,omitempty" yaml:"id,omitempty"`
+	Body    string `json:"body,omitempty" yaml:"body,omitempty"`
+	Author  string `json:"author,omitempty" yaml:"author,omitempty"`
+	Created string `json:"created,omitempty" yaml:"created,omitempty"`
+	Updated string `json:"updated,omitempty" yaml:"updated,omitempty"`
+}
+
 type SearchResponse struct {
 	SchemaVersion string         `json:"schemaVersion" yaml:"schemaVersion"`
 	JQL           string         `json:"jql" yaml:"jql"`
@@ -88,6 +105,40 @@ func (c JiraClient) AddComment(key, body string) (CommentResponse, error) {
 		return CommentResponse{}, WrapError("Could not parse Jira comment response", "Run the command again with --debug for the raw exchange.", err)
 	}
 	return CommentResponse{SchemaVersion: SchemaVersion, IssueKey: key, ID: wire.ID, Body: wire.Body, Created: wire.Created}, nil
+}
+
+func (c JiraClient) GetComments(key string, raw bool) (any, error) {
+	body, err := c.do(http.MethodGet, "/rest/api/2/issue/"+url.PathEscape(key)+"/comment", nil)
+	if err != nil {
+		return nil, err
+	}
+	if raw {
+		return RawBody(body), nil
+	}
+	var wire struct {
+		StartAt    int `json:"startAt"`
+		MaxResults int `json:"maxResults"`
+		Total      int `json:"total"`
+		Comments   []struct {
+			ID      string `json:"id"`
+			Body    string `json:"body"`
+			Created string `json:"created"`
+			Updated string `json:"updated"`
+			Author  *named `json:"author"`
+		} `json:"comments"`
+	}
+	if err := json.Unmarshal(body, &wire); err != nil {
+		return nil, WrapError("Could not parse Jira comments response", "Try -o raw to inspect Jira's response.", err)
+	}
+	comments := make([]CommentEntry, 0, len(wire.Comments))
+	for _, comment := range wire.Comments {
+		author := ""
+		if comment.Author != nil {
+			author = bestName(*comment.Author)
+		}
+		comments = append(comments, CommentEntry{ID: comment.ID, Body: comment.Body, Author: author, Created: comment.Created, Updated: comment.Updated})
+	}
+	return CommentsResponse{SchemaVersion: SchemaVersion, IssueKey: key, StartAt: wire.StartAt, MaxResults: wire.MaxResults, Total: wire.Total, Comments: comments}, nil
 }
 
 func (c JiraClient) Search(jql string) (SearchResponse, error) {

@@ -165,7 +165,22 @@ func issueCommand(rt *Runtime) *cobra.Command {
 	}}
 	comment.Flags().StringVarP(&commentInstance, "instance", "i", "", "Jira instance URL or alias for bare issue keys")
 	comment.Flags().StringVar(&bodyInput, "body", "", "comment body: literal text, @path, or -")
-	cmd.AddCommand(get, comment)
+
+	var commentsInstance string
+	comments := &cobra.Command{Use: "comments <url-or-key>", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		client, target, err := clientForIssue(rt, args[0], commentsInstance)
+		if err != nil {
+			return err
+		}
+		value, err := client.GetComments(target.Key, rt.Output == "raw")
+		if err != nil {
+			return err
+		}
+		return app.Render(rt.Out, rt.Output, value)
+	}}
+	comments.Flags().StringVarP(&commentsInstance, "instance", "i", "", "Jira instance URL or alias for bare issue keys")
+
+	cmd.AddCommand(get, comment, comments)
 	return cmd
 }
 

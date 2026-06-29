@@ -73,6 +73,8 @@ func TestFakeJiraIntegrationThroughCLI(t *testing.T) {
 			}
 			sawComment = true
 			_ = json.NewEncoder(w).Encode(map[string]string{"id": "10001", "body": payload["body"], "created": "2026-06-27T00:00:00.000+0000"})
+		case r.Method == http.MethodGet && r.URL.Path == "/rest/api/2/issue/PROJ-1/comment":
+			_ = json.NewEncoder(w).Encode(map[string]any{"startAt": 0, "maxResults": 50, "total": 1, "comments": []any{map[string]any{"id": "10001", "body": "first comment", "author": map[string]any{"displayName": "Agent User"}, "created": "2026-06-27T00:00:00.000+0000", "updated": "2026-06-27T00:01:00.000+0000"}}})
 		default:
 			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
 		}
@@ -96,6 +98,31 @@ func TestFakeJiraIntegrationThroughCLI(t *testing.T) {
 	comment := runCLI(t, credentialsPath, "", "issue", "comment", "PROJ-1", "--instance", "prod", "--body", "hello from fake integration", "-o", "json")
 	if !sawComment || !strings.Contains(comment, `"id":"10001"`) {
 		t.Fatalf("unexpected comment output: %s", comment)
+	}
+	commentsByURL := runCLI(t, credentialsPath, "", "issue", "comments", server.URL+"/browse/PROJ-1", "-o", "json")
+	if !strings.Contains(commentsByURL, `"issueKey":"PROJ-1"`) || !strings.Contains(commentsByURL, `"author":"Agent User"`) {
+		t.Fatalf("unexpected comments-by-url output: %s", commentsByURL)
+	}
+	commentsByKey := runCLI(t, credentialsPath, "", "issue", "comments", "PROJ-1", "--instance", "prod", "-o", "json")
+	if !strings.Contains(commentsByKey, `"body":"first comment"`) {
+		t.Fatalf("unexpected comments-by-key output: %s", commentsByKey)
+	}
+}
+
+func TestIssueGetDoesNotIncludeComments(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/rest/api/2/issue/PROJ-1" {
+			t.Fatalf("unexpected request: %s", r.URL.String())
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"key": "PROJ-1", "fields": map[string]any{"summary": "No comments here", "status": map[string]any{"name": "Open"}, "issuetype": map[string]any{"name": "Bug"}, "project": map[string]any{"key": "PROJ"}}})
+	}))
+	defer server.Close()
+
+	credentialsPath := filepath.Join(t.TempDir(), "credentials")
+	runCLI(t, credentialsPath, "token\n", "auth", "add", server.URL, "--alias", "prod", "-o", "json")
+	issue := runCLI(t, credentialsPath, "", "issue", "get", "PROJ-1", "--instance", "prod", "-o", "json")
+	if strings.Contains(issue, `"comments"`) {
+		t.Fatalf("issue get unexpectedly included comments: %s", issue)
 	}
 }
 

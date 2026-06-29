@@ -50,3 +50,47 @@ func TestJiraClientAuthIssueCommentSearch(t *testing.T) {
 		t.Fatalf("bad search: %+v err=%v", search, err)
 	}
 }
+
+func TestJiraClientGetComments(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer token" {
+			t.Fatalf("missing auth header: %q", r.Header.Get("Authorization"))
+		}
+		if r.Method != http.MethodGet || r.URL.Path != "/rest/api/2/issue/PROJ-1/comment" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"startAt":    0,
+			"maxResults": 50,
+			"total":      1,
+			"comments": []any{map[string]any{
+				"id":      "10001",
+				"body":    "first comment",
+				"created": "2026-06-27T00:00:00.000+0000",
+				"updated": "2026-06-27T00:01:00.000+0000",
+				"author":  map[string]any{"displayName": "Agent User", "name": "agent"},
+			}},
+		})
+	}))
+	defer server.Close()
+
+	client := JiraClient{BaseURL: server.URL, Token: "token", HTTP: server.Client()}
+	comments, err := client.GetComments("PROJ-1", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := comments.(CommentsResponse)
+	if page.SchemaVersion != SchemaVersion || page.IssueKey != "PROJ-1" || page.Total != 1 {
+		t.Fatalf("bad comments page: %+v", page)
+	}
+	if len(page.Comments) != 1 || page.Comments[0].Author != "Agent User" || page.Comments[0].Body != "first comment" {
+		t.Fatalf("bad comment mapping: %+v", page.Comments)
+	}
+	raw, err := client.GetComments("PROJ-1", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw.(RawBody)), `"comments"`) {
+		t.Fatalf("raw comments did not include Jira body: %s", raw)
+	}
+}
