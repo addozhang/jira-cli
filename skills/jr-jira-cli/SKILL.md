@@ -1,3 +1,12 @@
+---
+name: jr-jira-cli
+repo: addozhang/jira-cli
+description: >
+  URL-native Jira Server / Data Center CLI for AI agents. Use this skill when a
+  user asks to inspect Jira issues, read issue comments, search with JQL, or add
+  comments using the `jr` command.
+---
+
 # jr Jira CLI
 
 Use `jr` when you need to inspect Jira Server / Data Center issues from the
