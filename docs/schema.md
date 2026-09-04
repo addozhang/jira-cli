@@ -17,14 +17,29 @@ additive fields do not.
 ## Issue
 
 Stable fields: `schemaVersion`, `key`, `url`, `summary`, `status`, `type`,
-`project`, `assignee`, `reporter`, `description`, `labels`, `updated`.
+`project`, `assignee`, `reporter`, `reporterUsername`, `description`, `labels`,
+`updated`.
+
+`reporter` is the display name; `reporterUsername` is the Jira username and is
+the value accepted by `jr issue assign`.
 
 ## Comments
 
 Stable page fields: `schemaVersion`, `issueKey`, `startAt`, `maxResults`,
 `total`, `comments`.
 
-Stable comment fields: `id`, `body`, `author`, `created`, `updated`.
+Stable comment fields: `id`, `body`, `author`, `authorUsername`, `created`,
+`updated`.
+
+`author` is the display name; `authorUsername` is the Jira username and is the
+value accepted by `jr issue assign`.
+
+## Assign
+
+Stable fields: `schemaVersion`, `issueKey`, `assignee`, `url`.
+
+`assignee` echoes the username exactly as requested; Jira's `204 No Content`
+response carries no body, so the value is not re-fetched.
 
 ## Search
 

@@ -180,7 +180,21 @@ func issueCommand(rt *Runtime) *cobra.Command {
 	}}
 	comments.Flags().StringVarP(&commentsInstance, "instance", "i", "", "Jira instance URL or alias for bare issue keys")
 
-	cmd.AddCommand(get, comment, comments)
+	var assignInstance string
+	assign := &cobra.Command{Use: "assign <url-or-key> <username>", Args: cobra.ExactArgs(2), RunE: func(cmd *cobra.Command, args []string) error {
+		client, target, err := clientForIssue(rt, args[0], assignInstance)
+		if err != nil {
+			return err
+		}
+		value, err := client.AssignIssue(target.Key, args[1])
+		if err != nil {
+			return err
+		}
+		return app.Render(rt.Out, rt.Output, value)
+	}}
+	assign.Flags().StringVarP(&assignInstance, "instance", "i", "", "Jira instance URL or alias for bare issue keys")
+
+	cmd.AddCommand(get, comment, comments, assign)
 	return cmd
 }
 

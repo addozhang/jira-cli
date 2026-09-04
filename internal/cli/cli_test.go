@@ -3,11 +3,14 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/addozhang/jira-cli/internal/app"
 )
 
 func TestVersionCommand(t *testing.T) {
@@ -50,7 +53,8 @@ func TestIssueCommentRequiresBody(t *testing.T) {
 }
 
 func TestFakeJiraIntegrationThroughCLI(t *testing.T) {
-	var sawComment bool
+	var sawComment, sawAssign bool
+	var assigned map[string]string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer token" {
 			t.Fatalf("missing bearer token for %s %s: %q", r.Method, r.URL.Path, r.Header.Get("Authorization"))
@@ -59,7 +63,7 @@ func TestFakeJiraIntegrationThroughCLI(t *testing.T) {
 		case r.Method == http.MethodGet && r.URL.Path == "/rest/api/2/myself":
 			_ = json.NewEncoder(w).Encode(map[string]any{"name": "agent", "displayName": "Agent User"})
 		case r.Method == http.MethodGet && r.URL.Path == "/rest/api/2/issue/PROJ-1":
-			_ = json.NewEncoder(w).Encode(map[string]any{"key": "PROJ-1", "fields": map[string]any{"summary": "Fake Jira issue", "status": map[string]any{"name": "Open"}, "issuetype": map[string]any{"name": "Bug"}, "project": map[string]any{"key": "PROJ"}, "reporter": map[string]any{"displayName": "Reporter"}}})
+			_ = json.NewEncoder(w).Encode(map[string]any{"key": "PROJ-1", "fields": map[string]any{"summary": "Fake Jira issue", "status": map[string]any{"name": "Open"}, "issuetype": map[string]any{"name": "Bug"}, "project": map[string]any{"key": "PROJ"}, "reporter": map[string]any{"displayName": "Reporter", "name": "reporter1"}}})
 		case r.Method == http.MethodGet && r.URL.Path == "/rest/api/2/search":
 			if got := r.URL.Query().Get("jql"); got != "project = PROJ" {
 				t.Fatalf("jql=%q", got)
@@ -74,7 +78,12 @@ func TestFakeJiraIntegrationThroughCLI(t *testing.T) {
 			sawComment = true
 			_ = json.NewEncoder(w).Encode(map[string]string{"id": "10001", "body": payload["body"], "created": "2026-06-27T00:00:00.000+0000"})
 		case r.Method == http.MethodGet && r.URL.Path == "/rest/api/2/issue/PROJ-1/comment":
-			_ = json.NewEncoder(w).Encode(map[string]any{"startAt": 0, "maxResults": 50, "total": 1, "comments": []any{map[string]any{"id": "10001", "body": "first comment", "author": map[string]any{"displayName": "Agent User"}, "created": "2026-06-27T00:00:00.000+0000", "updated": "2026-06-27T00:01:00.000+0000"}}})
+			_ = json.NewEncoder(w).Encode(map[string]any{"startAt": 0, "maxResults": 50, "total": 1, "comments": []any{map[string]any{"id": "10001", "body": "first comment", "author": map[string]any{"displayName": "Agent User", "name": "agent"}, "created": "2026-06-27T00:00:00.000+0000", "updated": "2026-06-27T00:01:00.000+0000"}}})
+		case r.Method == http.MethodPut && r.URL.Path == "/rest/api/2/issue/PROJ-1/assignee":
+			assigned = map[string]string{}
+			_ = json.NewDecoder(r.Body).Decode(&assigned)
+			sawAssign = true
+			w.WriteHeader(http.StatusNoContent)
 		default:
 			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
 		}
@@ -107,6 +116,57 @@ func TestFakeJiraIntegrationThroughCLI(t *testing.T) {
 	if !strings.Contains(commentsByKey, `"body":"first comment"`) {
 		t.Fatalf("unexpected comments-by-key output: %s", commentsByKey)
 	}
+
+	issueWithReporter := runCLI(t, credentialsPath, "", "issue", "get", "PROJ-1", "--instance", "prod", "-o", "json")
+	if !strings.Contains(issueWithReporter, `"reporter":"Reporter"`) || !strings.Contains(issueWithReporter, `"reporterUsername":"reporter1"`) {
+		t.Fatalf("unexpected reporter username output: %s", issue)
+	}
+	if !strings.Contains(commentsByURL, `"authorUsername":"agent"`) {
+		t.Fatalf("unexpected author username output: %s", commentsByURL)
+	}
+
+	assignByURL := runCLI(t, credentialsPath, "", "issue", "assign", server.URL+"/browse/PROJ-1", "reporter1", "-o", "json")
+	if !sawAssign || assigned["name"] != "reporter1" || !strings.Contains(assignByURL, `"assignee":"reporter1"`) {
+		t.Fatalf("unexpected assign-by-url output: %s assigned=%+v", assignByURL, assigned)
+	}
+	assigned = nil
+	assignByKey := runCLI(t, credentialsPath, "", "issue", "assign", "PROJ-1", "agent", "--instance", "prod", "-o", "json")
+	if assigned["name"] != "agent" || !strings.Contains(assignByKey, `"issueKey":"PROJ-1"`) {
+		t.Fatalf("unexpected assign-by-key output: %s assigned=%+v", assignByKey, assigned)
+	}
+}
+
+func TestFakeJiraAssignRejectedIsActionable(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPut || r.URL.Path != "/rest/api/2/issue/PROJ-1/assignee" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]any{"errorMessages": []string{"User 'nobody' cannot be assigned issues."}})
+	}))
+	defer server.Close()
+
+	credentialsPath := filepath.Join(t.TempDir(), "credentials")
+	runCLI(t, credentialsPath, "token\n", "auth", "add", server.URL, "--alias", "prod", "-o", "json")
+
+	var out, errOut bytes.Buffer
+	rt := &Runtime{Out: &out, Err: &errOut, In: strings.NewReader(""), CredentialsPath: credentialsPath}
+	cmd := NewRootCommand(rt)
+	cmd.SetArgs([]string{"issue", "assign", "PROJ-1", "nobody", "--instance", "prod"})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected assign rejection error")
+	}
+	var appErr *app.Error
+	if !errors.As(err, &appErr) {
+		t.Fatalf("expected *app.Error, got %T", err)
+	}
+	if !strings.Contains(appErr.Message, "cannot be assigned") {
+		t.Fatalf("expected jira message, got: %q", appErr.Message)
+	}
+	if !strings.Contains(appErr.Next, "jr issue get") {
+		t.Fatalf("expected next step, got: %q", appErr.Next)
+	}
 }
 
 func TestIssueGetDoesNotIncludeComments(t *testing.T) {
@@ -123,6 +183,79 @@ func TestIssueGetDoesNotIncludeComments(t *testing.T) {
 	issue := runCLI(t, credentialsPath, "", "issue", "get", "PROJ-1", "--instance", "prod", "-o", "json")
 	if strings.Contains(issue, `"comments"`) {
 		t.Fatalf("issue get unexpectedly included comments: %s", issue)
+	}
+}
+
+func TestIssueAssignCommand(t *testing.T) {
+	var assigned map[string]string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer token" {
+			t.Fatalf("missing bearer token for %s %s", r.Method, r.URL.Path)
+		}
+		if r.Method != http.MethodPut || r.URL.Path != "/rest/api/2/issue/PROJ-1/assignee" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+		_ = json.NewDecoder(r.Body).Decode(&assigned)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	credentialsPath := filepath.Join(t.TempDir(), "credentials")
+	runCLI(t, credentialsPath, "token\n", "auth", "add", server.URL, "--alias", "prod", "-o", "json")
+
+	out := runCLI(t, credentialsPath, "", "issue", "assign", server.URL+"/browse/PROJ-1", "jdoe", "-o", "json")
+	if assigned["name"] != "jdoe" {
+		t.Fatalf("assignee not sent: %+v", assigned)
+	}
+	if !strings.Contains(out, `"assignee":"jdoe"`) || !strings.Contains(out, `"issueKey":"PROJ-1"`) || !strings.Contains(out, `"schemaVersion":"1"`) {
+		t.Fatalf("unexpected assign confirmation: %s", out)
+	}
+
+	assigned = nil
+	runCLI(t, credentialsPath, "", "issue", "assign", "PROJ-1", "jdoe", "--instance", "prod", "-o", "json")
+	if assigned["name"] != "jdoe" {
+		t.Fatalf("bare-key assign did not reach server: %+v", assigned)
+	}
+}
+
+func TestIssueAssignBlankUsernameFails(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("unexpected HTTP request for blank username: %s %s", r.Method, r.URL.String())
+	}))
+	defer server.Close()
+
+	credentialsPath := filepath.Join(t.TempDir(), "credentials")
+	runCLI(t, credentialsPath, "token\n", "auth", "add", server.URL, "--alias", "prod", "-o", "json")
+
+	var out, errOut bytes.Buffer
+	rt := &Runtime{Out: &out, Err: &errOut, In: strings.NewReader(""), CredentialsPath: credentialsPath}
+	cmd := NewRootCommand(rt)
+	cmd.SetArgs([]string{"issue", "assign", "PROJ-1", "", "--instance", "prod", "-o", "json"})
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("expected blank username error")
+	}
+}
+
+func TestIssueAssignRawOutputNotAvailable(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	credentialsPath := filepath.Join(t.TempDir(), "credentials")
+	runCLI(t, credentialsPath, "token\n", "auth", "add", server.URL, "--alias", "prod", "-o", "json")
+
+	var out, errOut bytes.Buffer
+	rt := &Runtime{Out: &out, Err: &errOut, In: strings.NewReader(""), CredentialsPath: credentialsPath}
+	cmd := NewRootCommand(rt)
+	cmd.SetArgs([]string{"issue", "assign", server.URL + "/browse/PROJ-1", "jdoe", "-o", "raw"})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected raw output error for assign")
+	}
+	var appErr *app.Error
+	if !errors.As(err, &appErr) || !strings.Contains(appErr.Message, "Raw output is not available") {
+		t.Fatalf("unexpected raw error: %v", err)
 	}
 }
 

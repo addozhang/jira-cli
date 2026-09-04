@@ -8,8 +8,8 @@ credentials, and behavior changes managed through OpenSpec.
 
 - Jira Server / Data Center only.
 - Jira Cloud, REST v3, OAuth, and ADF are out of scope.
-- First release supports auth, issue get, issue comment, explicit JQL search, and version.
-- Issue create/update/transition/assign and Agile API commands are out of scope.
+- First release supports auth, issue get, issue comment, issue comments, issue assign, explicit JQL search, and version.
+- Issue create/update/transition and Agile API commands are out of scope.
 
 ## Contracts
 

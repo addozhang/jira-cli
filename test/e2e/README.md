@@ -13,6 +13,8 @@ flow is `internal/cli.TestFakeJiraIntegrationThroughCLI`, which exercises:
 - `jr issue get`
 - `jr search --jql`
 - `jr issue comment`
+- `jr issue comments`
+- `jr issue assign`
 
 If a real Jira instance is available later, optional e2e tests can be added under
 an explicit build tag and must be skipped unless all required environment
