@@ -17,6 +17,26 @@ explicit JQL, add comments, and assign issues without opening the browser.
 - First release: `auth`, `issue get`, `issue comments`, `issue comment`, `issue assign`, `search --jql`, `version`.
 - `issue create/update/transition` and sprint/board commands are not in scope.
 
+## Install
+
+### Homebrew (macOS / Linux)
+
+```sh
+brew install addozhang/tap/jr
+```
+
+### Download a pre-built binary
+
+Download `jr_<version>_<os>_<arch>.tar.gz` (Windows builds ship as `.zip`) from
+the [Releases page](https://github.com/addozhang/jira-cli/releases), extract,
+and move `jr` onto your `PATH`.
+
+### go install
+
+```sh
+go install github.com/addozhang/jira-cli/cmd/jr@latest
+```
+
 ## Quick Start
 
 ```sh

@@ -22,3 +22,16 @@ archives:
         formats: [zip]
 checksum:
   name_template: checksums.txt
+
+homebrew_casks:
+  - name: jr
+    binaries:
+      - jr
+    repository:
+      owner: addozhang
+      name: homebrew-tap
+      # Uses HOMEBREW_TAP_GITHUB_TOKEN secret in the release workflow.
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    directory: Casks
+    homepage: "https://github.com/addozhang/jira-cli"
+    description: "URL-native Jira Server / Data Center CLI"
