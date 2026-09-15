@@ -9,6 +9,15 @@ import (
 	"strings"
 
 	"github.com/BurntSushi/toml"
+	"github.com/zalando/go-keyring"
+)
+
+const keyringService = "jr"
+
+var (
+	keyringGet    = keyring.Get
+	keyringSet    = keyring.Set
+	keyringDelete = keyring.Delete
 )
 
 type CredentialsFile struct {
@@ -17,7 +26,8 @@ type CredentialsFile struct {
 }
 
 type Credential struct {
-	Token string `toml:"token"`
+	Token  string `toml:"token"`
+	Secure bool   `toml:"secure,omitempty"`
 }
 
 type CredentialStore struct {
@@ -78,12 +88,22 @@ func (s *CredentialStore) Save() error {
 	return os.Chmod(s.Path, 0o600)
 }
 
-func (s *CredentialStore) Add(instanceURL, token, alias string) (string, error) {
+func (s *CredentialStore) Add(instanceURL, token, alias string, secure bool) (string, error) {
 	key, err := NormalizeInstance(instanceURL)
 	if err != nil {
 		return "", err
 	}
-	s.Data.Instances[key] = Credential{Token: token}
+	if prev, ok := s.Data.Instances[key]; ok && prev.Secure {
+		_ = keyringDelete(keyringService, key)
+	}
+	if secure {
+		if err := keyringSet(keyringService, key, token); err != nil {
+			return "", WrapError("Could not store the token in the OS keyring", "Run jr auth add "+key+" without --secure-storage to keep the token in the credentials file.", err)
+		}
+		s.Data.Instances[key] = Credential{Secure: true}
+	} else {
+		s.Data.Instances[key] = Credential{Token: token}
+	}
 	if alias != "" {
 		s.Data.Aliases[alias] = key
 	}
@@ -92,12 +112,19 @@ func (s *CredentialStore) Add(instanceURL, token, alias string) (string, error) 
 
 func (s *CredentialStore) Remove(value string) (bool, error) {
 	removed := false
+	secureKey := ""
 	if key, ok := s.Data.Aliases[value]; ok {
 		delete(s.Data.Aliases, value)
+		if cred, ok := s.Data.Instances[key]; ok && cred.Secure {
+			secureKey = key
+		}
 		delete(s.Data.Instances, key)
 		removed = true
 	} else if key, err := NormalizeInstance(value); err == nil {
-		if _, ok := s.Data.Instances[key]; ok {
+		if cred, ok := s.Data.Instances[key]; ok {
+			if cred.Secure {
+				secureKey = key
+			}
 			delete(s.Data.Instances, key)
 			removed = true
 		}
@@ -106,6 +133,9 @@ func (s *CredentialStore) Remove(value string) (bool, error) {
 				delete(s.Data.Aliases, alias)
 			}
 		}
+	}
+	if secureKey != "" {
+		_ = keyringDelete(keyringService, secureKey)
 	}
 	return removed, s.Save()
 }
@@ -116,7 +146,7 @@ func (s *CredentialStore) ResolveInstance(value string) (string, Credential, err
 		if !ok {
 			return "", Credential{}, NewError("Alias points to a missing credential", "Run jr auth add for the alias again.")
 		}
-		return target, cred, nil
+		return s.credential(target, cred)
 	}
 	key, err := NormalizeInstance(value)
 	if err != nil {
@@ -126,7 +156,7 @@ func (s *CredentialStore) ResolveInstance(value string) (string, Credential, err
 	if !ok {
 		return "", Credential{}, NewError("No credential configured for "+key, "Run jr auth add "+key+" first.")
 	}
-	return key, cred, nil
+	return s.credential(key, cred)
 }
 
 func (s *CredentialStore) MatchURL(rawURL string) (string, Credential, error) {
@@ -141,10 +171,44 @@ func (s *CredentialStore) MatchURL(rawURL string) (string, Credential, error) {
 	sort.Slice(keys, func(i, j int) bool { return len(keys[i]) > len(keys[j]) })
 	for _, key := range keys {
 		if instanceHasPrefix(target, key) {
-			return key, s.Data.Instances[key], nil
+			return s.credential(key, s.Data.Instances[key])
 		}
 	}
 	return "", Credential{}, NewError("No credential configured for "+target, "Run jr auth add "+target+" first.")
+}
+
+func (s *CredentialStore) credential(key string, cred Credential) (string, Credential, error) {
+	token, err := s.tokenFor(key, cred)
+	if err != nil {
+		return "", Credential{}, err
+	}
+	cred.Token = token
+	return key, cred, nil
+}
+
+func (s *CredentialStore) tokenFor(key string, cred Credential) (string, error) {
+	if !cred.Secure {
+		return cred.Token, nil
+	}
+	token, err := keyringGet(keyringService, key)
+	if errors.Is(err, keyring.ErrNotFound) {
+		return "", NewError("No token for "+key+" in the OS keyring", "Run jr auth add "+key+" --secure-storage again.")
+	}
+	if err != nil {
+		return "", WrapError("Could not read the OS keyring", "Run jr auth add "+key+" without --secure-storage to keep the token in the credentials file.", err)
+	}
+	return token, nil
+}
+
+func (s *CredentialStore) SecureInstances() []string {
+	secure := make([]string, 0)
+	for key, cred := range s.Data.Instances {
+		if cred.Secure {
+			secure = append(secure, key)
+		}
+	}
+	sort.Strings(secure)
+	return secure
 }
 
 func NormalizeInstance(raw string) (string, error) {

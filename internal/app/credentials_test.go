@@ -2,13 +2,157 @@ package app
 
 import (
 	"bytes"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/zalando/go-keyring"
 )
+
+func useMockKeyring(store map[string]string, fail bool) func() {
+	origGet, origSet, origDelete := keyringGet, keyringSet, keyringDelete
+	keyringGet = func(service, user string) (string, error) {
+		if fail {
+			return "", errors.New("keyring unavailable")
+		}
+		value, ok := store[user]
+		if !ok {
+			return "", keyring.ErrNotFound
+		}
+		return value, nil
+	}
+	keyringSet = func(service, user, password string) error {
+		if fail {
+			return errors.New("keyring unavailable")
+		}
+		store[user] = password
+		return nil
+	}
+	keyringDelete = func(service, user string) error {
+		delete(store, user)
+		return nil
+	}
+	return func() { keyringGet, keyringSet, keyringDelete = origGet, origSet, origDelete }
+}
+
+func TestSecureStorageRoundTrip(t *testing.T) {
+	mock := map[string]string{}
+	restore := useMockKeyring(mock, false)
+	defer restore()
+	path := filepath.Join(t.TempDir(), "credentials")
+	store, err := LoadCredentials(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, err := store.Add("https://jira.example.com", "secret", "prod", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "secret") {
+		t.Fatalf("token leaked to credentials file: %s", raw)
+	}
+	loaded, err := LoadCredentials(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := loaded.SecureInstances(); len(got) != 1 || got[0] != key {
+		t.Fatalf("secure instances = %v, want [%s]", got, key)
+	}
+	_, cred, err := loaded.ResolveInstance("prod")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cred.Token != "secret" {
+		t.Fatalf("token = %q, want %q", cred.Token, "secret")
+	}
+	removed, err := loaded.Remove("prod")
+	if err != nil || !removed {
+		t.Fatalf("remove failed: removed=%v err=%v", removed, err)
+	}
+	if _, ok := mock[key]; ok {
+		t.Fatal("keyring entry was not deleted")
+	}
+}
+
+func TestSecureStorageAddFailureKeepsFileClean(t *testing.T) {
+	restore := useMockKeyring(map[string]string{}, true)
+	defer restore()
+	path := filepath.Join(t.TempDir(), "credentials")
+	store, err := LoadCredentials(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = store.Add("https://jira.example.com", "secret", "", true)
+	if err == nil {
+		t.Fatal("expected error when keyring is unavailable")
+	}
+	var addErr *Error
+	if !errors.As(err, &addErr) || !strings.Contains(addErr.Next, "credentials file") {
+		t.Fatalf("error lacks file fallback hint: %v", err)
+	}
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("credentials file should not exist, got %v", err)
+	}
+}
+
+func TestResolveMissingKeyringTokenIsActionable(t *testing.T) {
+	restore := useMockKeyring(map[string]string{}, false)
+	defer restore()
+	store := &CredentialStore{Data: CredentialsFile{Instances: map[string]Credential{
+		"https://jira.example.com": {Secure: true},
+	}, Aliases: map[string]string{}}}
+	_, _, err := store.ResolveInstance("https://jira.example.com")
+	if err == nil {
+		t.Fatal("expected error for missing keyring token")
+	}
+	var appErr *Error
+	if !errors.As(err, &appErr) || !strings.Contains(appErr.Next, "secure-storage") {
+		t.Fatalf("error lacks re-add hint: %v", err)
+	}
+}
+
+func TestFileStorageReplacesSecureEntry(t *testing.T) {
+	mock := map[string]string{}
+	restore := useMockKeyring(mock, false)
+	defer restore()
+	path := filepath.Join(t.TempDir(), "credentials")
+	store, err := LoadCredentials(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, err := store.Add("https://jira.example.com", "secret", "", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Add("https://jira.example.com", "plain", "", false); err != nil {
+		t.Fatal(err)
+	}
+	if len(mock) != 0 {
+		t.Fatalf("keyring entry was not cleaned up: %v", mock)
+	}
+	loaded, err := LoadCredentials(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, cred, err := loaded.ResolveInstance(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cred.Token != "plain" || cred.Secure {
+		t.Fatalf("unexpected credential: %+v", cred)
+	}
+	if got := loaded.SecureInstances(); len(got) != 0 {
+		t.Fatalf("secure instances = %v, want empty", got)
+	}
+}
 
 func TestCredentialStoreSaveLoadRemoveAndPermissions(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "credentials")
@@ -16,7 +160,7 @@ func TestCredentialStoreSaveLoadRemoveAndPermissions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	key, err := store.Add("https://jira.example.com:443/jira", "secret", "prod")
+	key, err := store.Add("https://jira.example.com:443/jira", "secret", "prod", false)
 	if err != nil {
 		t.Fatal(err)
 	}

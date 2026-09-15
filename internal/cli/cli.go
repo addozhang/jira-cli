@@ -78,6 +78,7 @@ func versionCommand(rt *Runtime) *cobra.Command {
 func authCommand(rt *Runtime) *cobra.Command {
 	cmd := &cobra.Command{Use: "auth", Short: "Manage Jira credentials"}
 	var alias string
+	var secureStorage bool
 	add := &cobra.Command{Use: "add <url>", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		store, err := loadStore(rt)
 		if err != nil {
@@ -89,20 +90,26 @@ func authCommand(rt *Runtime) *cobra.Command {
 		if err != nil {
 			return app.WrapError("Could not read token", "Paste a Jira Personal Access Token and try again.", err)
 		}
-		key, err := store.Add(args[0], strings.TrimSpace(token), alias)
+		secure := secureStorage || os.Getenv("JR_SECURE_STORAGE") == "1"
+		key, err := store.Add(args[0], strings.TrimSpace(token), alias, secure)
 		if err != nil {
 			return err
 		}
-		return app.Render(rt.Out, rt.Output, map[string]any{"schemaVersion": app.SchemaVersion, "instance": key, "alias": alias})
+		storage := "file"
+		if secure {
+			storage = "keyring"
+		}
+		return app.Render(rt.Out, rt.Output, map[string]any{"schemaVersion": app.SchemaVersion, "instance": key, "alias": alias, "storage": storage})
 	}}
 	add.Flags().StringVar(&alias, "alias", "", "short instance alias")
+	add.Flags().BoolVar(&secureStorage, "secure-storage", false, "store the token in the OS keyring instead of the credentials file")
 
 	list := &cobra.Command{Use: "list", RunE: func(cmd *cobra.Command, args []string) error {
 		store, err := loadStore(rt)
 		if err != nil {
 			return err
 		}
-		return app.Render(rt.Out, rt.Output, map[string]any{"schemaVersion": app.SchemaVersion, "instances": keys(store.Data.Instances), "aliases": store.Data.Aliases})
+		return app.Render(rt.Out, rt.Output, map[string]any{"schemaVersion": app.SchemaVersion, "instances": keys(store.Data.Instances), "aliases": store.Data.Aliases, "secure": store.SecureInstances()})
 	}}
 	remove := &cobra.Command{Use: "remove <url-or-alias>", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		store, err := loadStore(rt)

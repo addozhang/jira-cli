@@ -15,6 +15,8 @@ credentials, and behavior changes managed through OpenSpec.
 
 - Structured output includes `schemaVersion: "1"`.
 - Tokens are never printed.
+- `auth add` stores tokens in plain text by default; `--secure-storage` keeps
+  them in the OS keyring with only a marker in the credentials file.
 - Errors are one sentence plus a suggested next step.
 - Exit code `0` means success; `>=10` means a `jr`-level failure.
 

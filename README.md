@@ -29,6 +29,15 @@ jr issue comment PROJ-123 --instance prod --body 'Investigating from terminal.'
 jr issue assign PROJ-123 jdoe --instance prod
 ```
 
+## Credential storage
+
+By default, tokens live in plain text at `~/.config/jr/credentials` (mode
+`0600`). Pass `--secure-storage` to `jr auth add` to keep the token in the OS
+keyring instead — macOS Keychain, Windows Credential Manager, or a freedesktop
+Secret Service (GNOME Keyring / KWallet). With `--secure-storage` the
+credentials file only holds a marker; the token never touches disk. Re-run
+`jr auth add` without the flag to move a token back to the file.
+
 ## Body Format
 
 Comment bodies are Jira Server wiki markup and are passed through unchanged.
