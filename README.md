@@ -7,7 +7,8 @@ explicit JQL, add comments, and assign issues without opening the browser.
 
 ## Disclaimer
 
-This project started as a hands-on study of the Jira RESTful API and as a testbed for driving such a CLI from AI coding agents. Most commands are read-only, but a few perform writes (add comments, assign issues). Use with care in production environments and manage permissions tightly — give the stored credentials the least privilege they need.
+> [!WARNING]
+> This project started as a hands-on study of the Jira RESTful API and as a testbed for driving such a CLI from AI coding agents. Most commands are read-only, but a few perform writes (add comments, assign issues). Use with care in production environments and manage permissions tightly — give the stored credentials the least privilege they need.
 
 ## Scope
 
